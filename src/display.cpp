@@ -96,6 +96,11 @@ void show(const char *text) {
   writeSegs(segs);
 }
 
+void showSegments(uint8_t s) {
+  const uint8_t segs[4] = {s, 0, 0, 0};
+  writeSegs(segs);
+}
+
 void setBrightness(uint8_t level) {
   brightness = level & 7;
   memset(lastSegs, 0xFF, 4);  // force refresh

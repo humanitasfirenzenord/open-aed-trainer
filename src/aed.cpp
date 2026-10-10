@@ -29,6 +29,7 @@ uint32_t stateAt = 0;    // when the current state was entered
 uint32_t idleSince = 0;  // when the last one-shot prompt finished
 uint32_t poweredAt = 0;
 uint32_t scenarioShownAt = 0;
+uint32_t lowBatteryShownAt = 0x80000000;  // far in the past
 uint32_t rev = 1;
 
 uint8_t scenarioIdx = 0;
@@ -141,6 +142,7 @@ void enter(State s) {
       if (sc().lowBattery) {
         sfx("alert");
         say("low_battery");
+        lowBatteryShownAt = millis();
       }
       break;
 
@@ -249,49 +251,41 @@ bool armedOrCharging() {
   return state == State::Charge || state == State::Armed || state == State::AutoShock;
 }
 
+// Single 7-segment digit:
+//   8.  self-test at power on       1-9,0  scenario (0 = 10) while waiting pads
+//   F   check pads (loose contact)  spinning segment  analysis
+//   -   motion during analysis      C   charging
+//   n   shock n (blinks while armed), shocks delivered afterwards
+//   n.  CPR cycle n                 L   battery low (3 s)
+char digit(uint32_t n) { return '0' + (n % 10); }
+
 void updateDisplay() {
-  char buf[8];
+  char buf[4] = {0};
   uint32_t t = since(stateAt);
   bool blink = (millis() / 400) % 2;
-  if (since(scenarioShownAt) < 2000) {
-    snprintf(buf, sizeof buf, "SC%2u", scenarioIdx + 1);
+  auto one = [&](char c, bool dp = false) {
+    buf[0] = c;
+    buf[1] = dp ? '.' : 0;
     Display::show(buf);
-    return;
-  }
+  };
+  if (since(scenarioShownAt) < 2000) return one(digit(scenarioIdx + 1));
+  if (since(lowBatteryShownAt) < 3000) return one('L');
   switch (state) {
-    case State::Off:
-      Display::clear();
-      break;
-    case State::PowerOn:
-      Display::show(t < SELFTEST_MS ? "8.8.:8.8." : "----");
-      break;
-    case State::WaitPads:
-    case State::PadsCheck:
-      snprintf(buf, sizeof buf, "%c %2u", blink ? 'P' : ' ', scenarioIdx + 1);
-      Display::show(buf);
-      break;
-    case State::Analyze:
-    case State::Motion: {
-      // rotating segment chase on the first digit, analysis number on the right
-      snprintf(buf, sizeof buf, "A%c%2u", "-_ "[(millis() / 250) % 3], analyses);
-      Display::show(buf);
+    case State::Off: Display::clear(); break;
+    case State::PowerOn: t < SELFTEST_MS ? one('8', true) : Display::clear(); break;
+    case State::WaitPads: one(digit(scenarioIdx + 1)); break;
+    case State::PadsCheck: one('F'); break;
+    case State::Analyze: {
+      static const uint8_t spin[] = {0x01, 0x02, 0x04, 0x08, 0x10, 0x20};  // a..f
+      Display::showSegments(spin[(millis() / 120) % 6]);
       break;
     }
-    case State::Charge:
+    case State::Motion: one('-'); break;
+    case State::Charge: one('C'); break;
     case State::Armed:
-    case State::AutoShock:
-      snprintf(buf, sizeof buf, "%s%2u", (state == State::Charge || blink) ? "S " : "  ", shocks + 1);
-      Display::show(buf);
-      break;
-    case State::Cpr:
-      // "C2-4": CPR cycle 2 of 4
-      snprintf(buf, sizeof buf, "C%u-%u", min<uint32_t>(cprCycle(), 9), min<uint32_t>(sc().cprCycles, 9));
-      Display::show(buf);
-      break;
-    default:
-      snprintf(buf, sizeof buf, "S %2u", shocks);
-      Display::show(buf);
-      break;
+    case State::AutoShock: blink ? one(digit(shocks + 1)) : Display::clear(); break;
+    case State::Cpr: one(digit(cprCycle()), true); break;
+    default: one(digit(shocks)); break;
   }
 }
 
@@ -497,6 +491,7 @@ void injectLowBattery() {
   if (state == State::Off) return;
   sfx("alert");
   say("low_battery");
+  lowBatteryShownAt = millis();
   log("Batteria scarica");
 }
 

@@ -53,7 +53,7 @@ through the captive portal.
 | `src/scenarios.cpp` | Scenario table. **Add new scenarios here** (one line each) |
 | `src/audio.cpp` | MP3 prompt player (own FreeRTOS task, queue + loop) |
 | `src/io.cpp` | Buttons, pad detect, optional mode switch, LEDs, volume pot |
-| `src/display.cpp` | TM1637 4-digit 7-segment driver |
+| `src/display.cpp` | Single-digit 7-segment driver (TM1637) |
 | `src/power.cpp` | Deep sleep, wake-up buttons, auto-off timers |
 | `src/web.cpp` + `web/index.html` | WiFi AP, captive portal, WebSocket UI (gzipped into the firmware at build time) |
 | `include/pins.h` | **Pin map**. Set any pin to `-1` to disable that feature |
@@ -91,7 +91,7 @@ LEDs connect **pin → 330 Ω → LED → GND**.
 | Shock-button LED | 23 | header | Don't press onboard KEY4 |
 | Pad-connector LED | 12 | JTAG header (MTDI) | Blinks while waiting for pads. **Strapping pin: LED + resistor to GND only** (disabled in the SD build) |
 | CPR / metronome LED | 15 | JTAG header (MTDO) | DIP 5 ON (disabled in the SD build) |
-| TM1637 CLK / DIO | 18 / 19 | header | 4-digit module. Onboard D5 flickers, which is harmless |
+| 7-segment digit (via TM1637) CLK / DIO | 18 / 19 | header | The trainer's single digit, driven by a TM1637. Onboard D5 flickers, which is harmless |
 | Speaker | — | LOUT or ROUT (white JST, right edge) | Onboard 3 W class-D amplifier, same audio on both |
 
 ### Board map
@@ -197,8 +197,10 @@ On the bench, the onboard keys do the same jobs as the external buttons:
 - Holding KEY6 simulates connected pads.
 
 The XFT's original LEDs and buttons must be rewired to these GPIOs. Its
-7-segment display needs either a TM1637 module in its place or its own driver.
-The display is optional; set its pins to `-1` to disable it.
+single-digit 7-segment display is driven through a TM1637 chip or module
+(2 wires): the digit's segments go to SEG1–SEG8 and its common pin to GRID1.
+The TM1637 suits common-cathode digits, so check the XFT digit's polarity
+first. The display is optional; set its pins to `-1` to disable it.
 
 ## How the trainer behaves
 
@@ -236,17 +238,22 @@ If the pads are pulled off at any point, the unit disarms and prompts
 Pressing SHOCK when the unit is not armed does nothing, but it is noted in
 the instructor log ("Pulsante SHOCK premuto fuori tempo"). To pick a
 scenario without a phone, **hold SHOCK for 2 s while the trainer is off**.
-Each hold moves to the next scenario; the display shows `SC n` and it beeps.
+Each hold moves to the next scenario; the display shows its number and it beeps.
 
-**Display (TM1637):**
+**Display (single digit):**
 
-| Display | When |
+| Shows | When |
 |---|---|
-| `8888` | Self-test at power on |
-| `P  n` | Waiting for pads, scenario n |
-| `A  n` | Analysis n |
-| `S  n` | Shock n (blinks while armed) |
-| `C2-4` | CPR, cycle 2 of 4 |
+| `8.` | Self-test at power on |
+| `1`–`9`, `0` | Waiting for pads: the scenario number (`0` = scenario 10). Also shown for 2 s after changing scenario |
+| `F` | Check pads (poor contact) |
+| spinning segment | Analysis in progress |
+| `-` | Motion detected |
+| `C` | Charging |
+| `n`, blinking | Armed, shock number n ready to deliver |
+| `n` | After a shock / no shock: shocks delivered so far |
+| `n.` | CPR, cycle n (the dot tells it apart from the shock count) |
+| `L` | Battery low (3 s) |
 
 ### Scenarios
 

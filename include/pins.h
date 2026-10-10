@@ -45,7 +45,7 @@
 #define PIN_LED_CPR      15  // JTAG MTDO (DIP 5 ON). Metronome / CPR light
 #endif
 
-// ---- 7-segment display (TM1637 4-digit module) ---------------------------
+// ---- 7-segment display: the trainer's single digit, via a TM1637 ------------
 #define PIN_TM1637_CLK   18  // KEY5 pad
 #define PIN_TM1637_DIO   19  // KEY3 pad, also onboard LED D5 (flickers, harmless)
 
