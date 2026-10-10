@@ -1,0 +1,31 @@
+# PlatformIO build output and downloaded libraries
+.pio/
+.vscode/
+.pioenvs/
+.piolibdeps/
+
+# Generated at build time from web/index.html (scripts/embed_web.py)
+include/web_index.h
+
+# Local tooling, recreated by tools/setup.sh
+tools/.venv/
+tools/.venv-kokoro/
+tools/voices/*.onnx
+tools/voices/*.onnx.json
+
+# Python
+__pycache__/
+*.pyc
+
+# Editors / OS
+.DS_Store
+.idea/
+*.swp
+*~
+
+# Rendered voice prompts: everyone generates their own with tools/gen_audio.py
+# (the licence depends on the voice used, e.g. macOS voices can't be shared)
+sdcard/
+
+# Per-machine voice settings for tools/gen_audio.py
+audio/voice.local.json

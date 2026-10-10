@@ -1,0 +1,6 @@
+# Name,   Type, SubType,  Offset,   Size
+# No OTA: one 1.9 MB app + 2 MB LittleFS for the audio prompts
+nvs,      data, nvs,      0x9000,   0x5000,
+factory,  app,  factory,  0x10000,  0x1E0000,
+spiffs,   data, spiffs,   0x1F0000, 0x200000,
+coredump, data, coredump, 0x3F0000, 0x10000,

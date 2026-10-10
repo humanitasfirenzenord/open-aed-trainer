@@ -1,0 +1,35 @@
+{
+  "engine": "kokoro",
+  "languages": {
+    "it": {
+      "kokoro": {"lang": "i", "voice": "if_sara", "speed": 1.0},
+      "piper": "it_IT-paola-medium", "length_scale": 1.05,
+      "say": ""
+    }
+  },
+  "prompts": {
+    "expose_chest":       {"it": "Rimuovere gli indumenti dal torace del paziente."},
+    "apply_pads":         {"it": "Applicare gli elettrodi sul torace nudo del paziente."},
+    "plug_connector":     {"it": "Inserire il connettore degli elettrodi, vicino alla luce lampeggiante."},
+    "check_pads":         {"it": "Controllare gli elettrodi. Premere saldamente gli elettrodi sulla pelle nuda del paziente."},
+    "analysing":          {"it": "Non toccare il paziente. Analisi del ritmo cardiaco in corso."},
+    "motion":             {"it": "È stato rilevato un movimento. Non toccare il paziente."},
+    "shock_advised":      {"it": "Shock consigliato."},
+    "charging":           {"it": "Carica in corso. Allontanarsi dal paziente."},
+    "press_shock":        {"it": "Premere il pulsante di shock lampeggiante."},
+    "auto_shock":         {"it": "Erogazione shock in corso."},
+    "shock_delivered":    {"it": "Shock erogato."},
+    "safe_touch":         {"it": "Adesso è sicuro toccare il paziente."},
+    "give_breaths":       {"it": "Dare respiro."},
+    "continue_cpr":       {"it": "Riprendere RCP."},
+    "stop_cpr":           {"it": "Interrompere RCP."},
+    "no_shock":           {"it": "Shock non consigliato."},
+    "shock_cancelled":    {"it": "Shock annullato."},
+    "shock_not_pressed":  {"it": "Pulsante di shock non premuto."},
+    "low_battery":        {"it": "Batteria scarica."},
+    "service":            {"it": "Necessaria manutenzione."},
+    "mode_auto":          {"it": "Modalità automatica."},
+    "mode_semi":          {"it": "Modalità semiautomatica."},
+    "shock_now":          {"it": "Shock in corso."}
+  }
+}

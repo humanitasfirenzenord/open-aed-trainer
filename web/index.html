@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#111">
+<title>OpenAEDTrainer</title>
+<style>
+:root{--bg:#111;--card:#1c1c1e;--fg:#f2f2f2;--mut:#9a9aa0;--acc:#2ecc71;--warn:#f39c12;--bad:#e74c3c;--shock:#ff8c00;--btn:#2c2c2e}
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0 auto;background:var(--bg);color:var(--fg);font:16px/1.35 -apple-system,system-ui,Segoe UI,Roboto,sans-serif;padding:16px;padding-bottom:40px;max-width:560px}
+h1{font-size:18px;margin:0 0 12px;display:flex;justify-content:space-between;align-items:center}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--bad);display:inline-block;margin-right:6px}
+.dot.ok{background:var(--acc)}
+.card{background:var(--card);border-radius:14px;padding:14px;margin-bottom:12px}
+.card h2{font-size:13px;font-weight:600;color:var(--mut);margin:0 0 8px;text-transform:uppercase;letter-spacing:.04em}
+.state{font-size:25px;font-weight:700;margin:2px 0 4px}
+.state.armed{color:var(--shock)}
+.sub{color:var(--mut);font-size:14px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
+.kpi{background:#000;border-radius:10px;padding:8px;text-align:center}
+.kpi b{display:block;font:700 26px/1.1 ui-monospace,Menlo,monospace;color:#ff3b30}
+.kpi span{font-size:12px;color:var(--mut)}
+button{font:inherit;border:0;border-radius:12px;padding:14px 8px;background:var(--btn);color:var(--fg);width:100%;cursor:pointer;touch-action:manipulation}
+button:active{filter:brightness(1.3)}
+button:disabled{opacity:.35}
+.row{display:flex;gap:8px;margin-top:8px}
+.power.on{background:var(--acc);color:#000;font-weight:600}
+.shock{background:#3a2a10;color:var(--shock);font-weight:700;font-size:20px}
+.shock.armed{background:var(--shock);color:#000;animation:blink .5s infinite alternate}
+@keyframes blink{to{filter:brightness(1.6)}}
+button.sel{background:#48484a;outline:2px solid var(--fg)}
+label{display:block;font-size:13px;color:var(--mut);margin:12px 0 4px}
+select,input[type=range]{width:100%}
+select{font:inherit;padding:10px;border-radius:10px;background:var(--btn);color:var(--fg);border:0}
+.seg{display:flex;background:var(--btn);border-radius:10px;padding:3px;gap:3px}
+.seg button{padding:9px;border-radius:8px;background:transparent}
+.seg button.sel{background:#48484a;outline:0}
+.led{display:inline-block;width:12px;height:12px;border-radius:50%;background:#333;margin-right:4px;vertical-align:-1px}
+.led.on{background:var(--acc);box-shadow:0 0 8px var(--acc)}
+.led.shk.on{background:var(--shock);box-shadow:0 0 8px var(--shock)}
+#log{font:12px/1.45 ui-monospace,Menlo,monospace;color:var(--mut);max-height:220px;overflow:auto;white-space:pre-wrap}
+.desc{font-size:13px;color:var(--mut);margin-top:6px}
+.warn{color:var(--warn)}
+</style>
+</head>
+<body>
+<h1><span>OpenAEDTrainer</span><span class="sub"><i id="conn" class="dot"></i><span id="connt">non connesso</span></span></h1>
+
+<div class="card">
+  <div class="state" id="state">—</div>
+  <div class="sub" id="detail"></div>
+  <div class="grid">
+    <div class="kpi"><b id="shocks">0</b><span>shock</span></div>
+    <div class="kpi"><b id="elapsed">—</b><span>tempo</span></div>
+    <div class="kpi"><b id="timer">—</b><span id="timerl">timer</span></div>
+  </div>
+  <div class="sub" style="margin-top:10px">
+    <span class="led" id="ledPwr"></span>acceso
+    &nbsp; <span class="led" id="ledPads"></span>elettrodi
+    &nbsp; <span class="led shk" id="ledShk"></span>shock
+    &nbsp; <span id="mode"></span>
+  </div>
+  <div class="desc warn" id="sdwarn" hidden>⚠ File audio non trovati: caricare la cartella sdcard/ (pio run -t uploadfs).</div>
+</div>
+
+<div class="card">
+  <button class="power" id="bPower">Accendi</button>
+  <div class="row"><button class="shock" id="bShock" disabled>⚡ SHOCK</button></div>
+</div>
+
+<div class="card">
+  <h2>Istruttore</h2>
+  <label for="scn">Scenario</label>
+  <select id="scn"></select>
+  <div class="desc" id="scnDesc"></div>
+
+  <label>Prossima analisi</label>
+  <div class="seg" id="force">
+    <button data-v="-1">Da scenario</button>
+    <button data-v="1">Defibrillabile</button>
+    <button data-v="0">Non defibr.</button>
+  </div>
+
+  <label>Eventi</label>
+  <div class="row" style="margin-top:0">
+    <button id="bMotion">Movimento</button>
+    <button id="bPoor">Contatto scarso</button>
+    <button id="bBat">Batteria scarica</button>
+  </div>
+  <div class="row">
+    <button id="bSkip">Salta attesa</button>
+  </div>
+  <div class="desc">“Salta attesa” termina subito la RCP o la verifica degli elettrodi.</div>
+
+  <label>Elettrodi</label>
+  <div class="seg" id="pads">
+    <button data-v="-1">Connettore</button>
+    <button data-v="1">Collegati</button>
+    <button data-v="0">Scollegati</button>
+  </div>
+  <div class="desc">“Connettore” segue il sensore fisico; le altre opzioni lo simulano.</div>
+
+  <label>Modalità</label>
+  <div class="seg" id="auto">
+    <button data-v="0">Semiautomatico</button>
+    <button data-v="1">Automatico</button>
+  </div>
+
+  <label for="vol">Volume <span id="volv"></span></label>
+  <input type="range" id="vol" min="0" max="100" step="5">
+</div>
+
+<div class="card">
+  <h2>Registro eventi</h2>
+  <div id="log"></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let ws, st = {}, scenarios = [];
+const fmt = s => s < 0 ? '—' : Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+const send = o => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
+
+function connect() {
+  ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onopen = () => { $('conn').classList.add('ok'); $('connt').textContent = 'connesso'; };
+  ws.onclose = () => { $('conn').classList.remove('ok'); $('connt').textContent = 'non connesso'; setTimeout(connect, 1500); };
+  ws.onmessage = e => {
+    const m = JSON.parse(e.data);
+    if (m.type === 'config') { scenarios = m.scenarios; renderConfig(); }
+    else if (m.type === 'state') { st = m; render(); }
+    else if (m.type === 'log') { log(m.msg); }
+  };
+}
+
+function log(msg) {
+  const l = $('log');
+  l.textContent = msg + '\n' + l.textContent.slice(0, 6000);
+}
+
+function renderConfig() {
+  $('scn').innerHTML = scenarios.map((s, i) => `<option value="${i}">${i + 1}. ${s.name}</option>`).join('');
+  render();
+}
+
+function seg(id, val) {
+  $(id).querySelectorAll('button').forEach(b => b.classList.toggle('sel', +b.dataset.v === val));
+}
+
+function render() {
+  if (!st.type) return;
+  $('state').textContent = st.on ? st.label : 'Spento';
+  $('state').classList.toggle('armed', st.armed);
+  $('detail').textContent = st.on ? st.detail : '';
+  $('shocks').textContent = st.shocks;
+  $('elapsed').textContent = st.on ? fmt(st.elapsed) : '—';
+  $('timer').textContent = st.timer >= 0 ? fmt(st.timer) : '—';
+  $('timerl').textContent = st.timerLabel || 'timer';
+  $('bPower').classList.toggle('on', st.on);
+  $('bPower').textContent = st.on ? 'Spegni' : 'Accendi';
+  $('bShock').disabled = !st.armed;
+  $('bShock').classList.toggle('armed', st.armed);
+  $('ledPwr').classList.toggle('on', st.on);
+  $('ledShk').classList.toggle('on', st.armed);
+  $('ledPads').classList.toggle('on', st.pads);
+  $('mode').textContent = st.auto ? 'automatico' : 'semiautomatico';
+  $('sdwarn').hidden = st.storage;
+  if (document.activeElement !== $('scn')) $('scn').value = st.scenario;
+  const s = scenarios[st.scenario]; $('scnDesc').textContent = s ? s.desc : '';
+  seg('force', st.forced); seg('pads', st.padsVirtual); seg('auto', st.auto ? 1 : 0);
+  if (document.activeElement !== $('vol')) $('vol').value = st.volume;
+  $('volv').textContent = st.volume + '%';
+}
+
+$('bPower').onclick = () => send({ cmd: 'power' });
+$('bShock').onclick = () => send({ cmd: 'shock' });
+$('bSkip').onclick = () => send({ cmd: 'skip' });
+$('bMotion').onclick = () => send({ cmd: 'motion' });
+$('bPoor').onclick = () => send({ cmd: 'poorpads' });
+$('bBat').onclick = () => send({ cmd: 'lowbat' });
+$('scn').onchange = e => send({ cmd: 'scenario', value: +e.target.value });
+$('force').onclick = e => e.target.dataset.v && send({ cmd: 'force', value: +e.target.dataset.v });
+$('pads').onclick = e => { const v = e.target.dataset.v; if (v) send({ cmd: 'pads', value: v === '-1' ? null : v === '1' }); };
+$('auto').onclick = e => e.target.dataset.v && send({ cmd: 'auto', value: e.target.dataset.v === '1' });
+$('vol').oninput = e => { $('volv').textContent = e.target.value + '%'; send({ cmd: 'volume', value: +e.target.value }); };
+connect();
+</script>
+</body>
+</html>
