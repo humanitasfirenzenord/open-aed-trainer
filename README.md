@@ -2,7 +2,12 @@
   <img src="docs/header.svg" alt="Humanitas Firenze Nord" width="100%">
 </p>
 
-# OpenAEDTrainer
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/logo-wordmark-dark.svg">
+    <img src="docs/logo-wordmark.svg" alt="OpenAEDTrainer" height="72">
+  </picture>
+</h1>
 
 **OpenAEDTrainer is an open source AED trainer board.** Use it to build an AED
 trainer from scratch, or to bring back a commercial trainer whose
