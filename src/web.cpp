@@ -23,11 +23,96 @@ QueueHandle_t cmdQueue;
 uint8_t volume = 70;
 uint32_t lastRev = 0;
 uint32_t lastPush = 0;
+volatile bool trainerOn = false;  // custom prompts can only be changed while off
+
+// Custom voice prompts (uploaded MP3s, already converted by the browser).
+// One upload at a time: there is one instructor.
+constexpr size_t MAX_UPLOAD = 256 * 1024;  // ~30 s at 64 kbps, the UI caps far lower
+File upload;
+String uploadErr;
+
+// "it/analysing": a voice prompt that exists in the default set
+bool validName(const String &n) {
+  int slash = n.indexOf('/');
+  if (slash < 1 || n.indexOf('/', slash + 1) >= 0 || n.length() > 48) return false;
+  for (size_t i = 0; i < n.length(); i++) {
+    char c = n[i];
+    if (!(islower(c) || isdigit(c) || c == '_' || c == '/')) return false;
+  }
+  return Audio::exists(Audio::defaultPath(n));
+}
+
+String promptsJson() {
+  fs::FS &fs = Audio::storage();
+  const String &lang = Audio::language();
+  JsonDocument doc;
+  doc["lang"] = lang;
+  doc["storage"] = Audio::storageOk();
+  doc["free"] = Audio::storageOk() ? Audio::freeBytes() : 0;
+  doc["locked"] = trainerOn;
+  JsonArray arr = doc["prompts"].to<JsonArray>();
+  if (Audio::storageOk()) {
+    File dir = fs.open("/" + lang);
+    for (File f = dir ? dir.openNextFile() : File(); f; f = dir.openNextFile()) {
+      String n = f.name();
+      n = n.substring(n.lastIndexOf('/') + 1);
+      if (f.isDirectory() || !n.endsWith(".mp3")) continue;
+      String id = n.substring(0, n.length() - 4);
+      JsonObject o = arr.add<JsonObject>();
+      o["id"] = id;
+      o["custom"] = Audio::exists(Audio::customPath(lang + "/" + id));
+    }
+  }
+  String out;
+  serializeJson(doc, out);
+  return out;
+}
+
+void onUpload(AsyncWebServerRequest *req, const String &, size_t index, uint8_t *data, size_t len, bool final) {
+  fs::FS &fs = Audio::storage();
+  String name = req->arg("name");
+  String tmp = Audio::customPath(name) + ".tmp";
+  if (index == 0) {
+    if (upload) upload.close();  // a previous upload that never finished
+    uploadErr = "";
+    if (trainerOn) uploadErr = "Spegnere il trainer prima di modificare i messaggi";
+    else if (!Audio::storageOk() || !validName(name)) uploadErr = "Messaggio sconosciuto";
+    else if (req->contentLength() > MAX_UPLOAD) uploadErr = "File troppo grande";
+    else if (req->contentLength() + 16 * 1024 > Audio::freeBytes()) uploadErr = "Spazio esaurito";
+    if (uploadErr.length()) return;
+    String dir = "/custom";
+    fs.mkdir(dir);
+    fs.mkdir(dir + "/" + name.substring(0, name.indexOf('/')));
+    upload = fs.open(tmp, FILE_WRITE);
+    if (!upload) {
+      uploadErr = "Impossibile scrivere il file";
+      return;
+    }
+  }
+  if (uploadErr.length() || !upload) return;
+  if (len && upload.write(data, len) != len) {
+    upload.close();
+    fs.remove(tmp);
+    uploadErr = "Scrittura non riuscita (spazio esaurito?)";
+    return;
+  }
+  if (final) {
+    upload.close();
+    String dst = Audio::customPath(name);
+    if (trainerOn) {  // switched on during the upload: don't touch a file it may be playing
+      fs.remove(tmp);
+      uploadErr = "Spegnere il trainer prima di modificare i messaggi";
+      return;
+    }
+    if (Audio::exists(dst)) fs.remove(dst);
+    if (!fs.rename(tmp, dst)) uploadErr = "Impossibile salvare il file";
+    else log_i("custom prompt %s: %u bytes", name.c_str(), (unsigned)(index + len));
+  }
+}
 
 String configJson() {
   JsonDocument doc;
   doc["type"] = "config";
-  doc["storage"] = Audio::storageName();
   JsonArray arr = doc["scenarios"].to<JsonArray>();
   for (size_t i = 0; i < Scenarios::count(); i++) {
     JsonObject o = arr.add<JsonObject>();
@@ -131,6 +216,40 @@ void begin(const char *ssid, const char *password) {
   server.on("/api/state", HTTP_GET, [](AsyncWebServerRequest *req) {
     req->send(200, "application/json", stateJson());
   });
+  server.on("/lame.min.js", HTTP_GET, [](AsyncWebServerRequest *req) {
+    auto *res = req->beginResponse(200, "text/javascript", WEB_LAME_GZ, WEB_LAME_GZ_LEN);
+    res->addHeader("Content-Encoding", "gzip");
+    res->addHeader("Cache-Control", "max-age=86400");
+    req->send(res);
+  });
+
+  // Custom voice prompts: list, upload, revert to default, listen
+  server.on("/api/prompts", HTTP_GET, [](AsyncWebServerRequest *req) {
+    req->send(200, "application/json", promptsJson());
+  });
+  server.on("/api/upload", HTTP_POST, [](AsyncWebServerRequest *req) {
+    if (uploadErr.length()) req->send(400, "text/plain", uploadErr);
+    else req->send(200, "application/json", promptsJson());
+  }, onUpload);
+  server.on("/api/prompts", HTTP_DELETE, [](AsyncWebServerRequest *req) {
+    String name = req->arg("name");
+    if (trainerOn) return req->send(409, "text/plain", "Spegnere il trainer prima di modificare i messaggi");
+    if (!Audio::storageOk() || !validName(name)) return req->send(400, "text/plain", "Messaggio sconosciuto");
+    fs::FS &fs = Audio::storage();
+    if (Audio::exists(Audio::customPath(name))) fs.remove(Audio::customPath(name));
+    log_i("custom prompt %s removed", name.c_str());
+    req->send(200, "application/json", promptsJson());
+  });
+  server.on("/prompt.mp3", HTTP_GET, [](AsyncWebServerRequest *req) {
+    String name = req->arg("name");
+    if (!Audio::storageOk() || !validName(name)) return req->send(404);
+    fs::FS &fs = Audio::storage();
+    String path = Audio::customPath(name);
+    if (req->hasArg("default") || !Audio::exists(path)) path = Audio::defaultPath(name);
+    auto *res = req->beginResponse(fs, path, "audio/mpeg");
+    res->addHeader("Cache-Control", "no-store");
+    req->send(res);
+  });
   // Captive portal probes (Android/iOS/Windows) and anything else -> UI
   server.onNotFound([](AsyncWebServerRequest *req) {
     req->redirect("http://" + WiFi.softAPIP().toString() + "/");
@@ -146,6 +265,7 @@ void update() {
   if (Aed::revision() != lastRev || now - lastPush > 1000) {
     lastRev = Aed::revision();
     lastPush = now;
+    trainerOn = Aed::status().on;
     ws.cleanupClients();
     if (ws.count()) ws.textAll(stateJson());
   }

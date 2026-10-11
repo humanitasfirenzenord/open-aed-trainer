@@ -6,7 +6,6 @@
 
 #include "aed.h"
 #include "audio.h"
-#include "display.h"
 #include "io.h"
 #include "pins.h"
 
@@ -23,7 +22,6 @@ uint32_t sleepRequestedAt = 0;
 
 void sleepNow() {
   log_i("going to deep sleep");
-  Display::clear();
   for (int i = 0; i < (int)IO::Led::COUNT; i++) IO::setLed((IO::Led)i, IO::Pattern::Off);
   IO::update();
   Audio::shutdown();
@@ -37,7 +35,8 @@ void sleepNow() {
   gpio_deep_sleep_hold_en();
 
   // Wake on POWER (ext0) or SHOCK (ext1 with a single pin = "this pin low").
-  // Both are active-low and get the RTC pull-up while asleep.
+  // Both are active-low and get the RTC pull-up while asleep. Only RTC pins
+  // can wake the chip: SHOCK on GPIO18 can't.
 #if PIN_BTN_POWER >= 0
 #if PIN_BTN_POWER < 34  // 34-39 have no internal pulls (GPIO36 has the board's)
   rtc_gpio_pullup_en((gpio_num_t)PIN_BTN_POWER);
@@ -46,9 +45,11 @@ void sleepNow() {
   esp_sleep_enable_ext0_wakeup((gpio_num_t)PIN_BTN_POWER, 0);
 #endif
 #if PIN_BTN_SHOCK >= 0
-  rtc_gpio_pullup_en((gpio_num_t)PIN_BTN_SHOCK);
-  rtc_gpio_pulldown_dis((gpio_num_t)PIN_BTN_SHOCK);
-  esp_sleep_enable_ext1_wakeup(1ULL << PIN_BTN_SHOCK, ESP_EXT1_WAKEUP_ALL_LOW);
+  if (rtc_gpio_is_valid_gpio((gpio_num_t)PIN_BTN_SHOCK)) {
+    rtc_gpio_pullup_en((gpio_num_t)PIN_BTN_SHOCK);
+    rtc_gpio_pulldown_dis((gpio_num_t)PIN_BTN_SHOCK);
+    esp_sleep_enable_ext1_wakeup(1ULL << PIN_BTN_SHOCK, ESP_EXT1_WAKEUP_ALL_LOW);
+  }
 #endif
   esp_deep_sleep_start();
 }

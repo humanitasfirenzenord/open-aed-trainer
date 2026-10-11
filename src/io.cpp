@@ -6,8 +6,9 @@ namespace IO {
 namespace {
 
 struct Button {
-  explicit Button(int p) : pin(p) {}
+  Button(int p, bool momentary) : pin(p), momentary(momentary), armed(!momentary) {}
   int pin;
+  bool momentary;  // push button; false = level input (pad connector, switch)
   bool stable = false;  // pressed?
   bool lastRaw = false;
   uint32_t changedAt = 0;
@@ -15,16 +16,19 @@ struct Button {
   bool pressEvent = false;
   bool longEvent = false;
   bool longFired = false;
+  // No events until the button has been seen released: the one that woke us
+  // from deep sleep may still be held, and an input stuck at GND (wiring,
+  // DIP switches) must not fire presses and long presses on its own.
+  bool armed;
+  bool stuckLogged = false;
 
   void begin() {
     if (pin < 0) return;
     // 34-39 have no internal pulls; the Audio Kit has 10k pull-ups on its keys
     pinMode(pin, pin >= 34 ? INPUT : INPUT_PULLUP);
-    // Start from the current level: the button that woke us from deep sleep
-    // may still be held, and must not register as a new press.
     delayMicroseconds(50);
-    stable = lastRaw = digitalRead(pin) == LOW;
-    if (stable) longFired = true;  // no long-press either
+    // Buttons count as held until update() sees them released
+    stable = lastRaw = momentary || digitalRead(pin) == LOW;
   }
   void update(uint32_t now, uint16_t debounceMs = 30) {
     if (pin < 0) return;
@@ -32,6 +36,16 @@ struct Button {
     if (raw != lastRaw) {
       lastRaw = raw;
       changedAt = now;
+    }
+    if (!armed) {
+      if (!raw && now - changedAt >= debounceMs) {
+        armed = true;
+        stable = false;
+      } else if (raw && !stuckLogged && now > 5000) {
+        stuckLogged = true;
+        log_w("GPIO%d held LOW since boot: button stuck or input wired to GND? Ignored until released", pin);
+      }
+      return;
     }
     if (raw != stable && now - changedAt >= debounceMs) {
       stable = raw;
@@ -54,11 +68,11 @@ struct Button {
   }
 };
 
-Button power(PIN_BTN_POWER);
-Button power2(PIN_BTN_POWER2);
-Button shock(PIN_BTN_SHOCK);
-Button pads(PIN_PADS_DETECT);
-Button mode(PIN_MODE_SWITCH);
+Button power(PIN_BTN_POWER, true);
+Button power2(PIN_BTN_POWER2, true);
+Button shock(PIN_BTN_SHOCK, true);
+Button pads(PIN_PADS_DETECT, false);
+Button mode(PIN_MODE_SWITCH, false);
 
 int8_t padsOverride = -1;
 

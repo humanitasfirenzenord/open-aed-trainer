@@ -1,7 +1,6 @@
 #include "aed.h"
 
 #include "audio.h"
-#include "display.h"
 #include "io.h"
 #include "scenarios.h"
 
@@ -23,13 +22,17 @@ constexpr uint16_t ARMED_TONE_HZ = 1200;
 constexpr uint32_t PADS_REPEAT_MS = 8000;
 constexpr uint32_t SELFTEST_MS = 1000;
 constexpr uint32_t POWERON_PAUSE_MS = 1000;  // after the power-on tone
+// CPR cycle (ERC 2021: 30:2, 100-120/min, < 10 s pause for the breaths):
+// 30 metronome clicks, then "give breath" once per breath, BREATH_SLOT_MS apart
+constexpr uint16_t CPR_BPM = 110;
+constexpr uint16_t COMPRESSIONS = 30;
+constexpr uint8_t BREATHS = 2;
+constexpr uint32_t BREATH_SLOT_MS = 3000;  // ~1 s insufflation + exhalation
 
 State state = State::Off;
 uint32_t stateAt = 0;    // when the current state was entered
 uint32_t idleSince = 0;  // when the last one-shot prompt finished
 uint32_t poweredAt = 0;
-uint32_t scenarioShownAt = 0;
-uint32_t lowBatteryShownAt = 0x80000000;  // far in the past
 uint32_t rev = 1;
 
 uint8_t scenarioIdx = 0;
@@ -125,7 +128,6 @@ void enter(State s) {
       if (prev != State::Off) sfx("power_off");
       Audio::keepAmplifierOn(false);  // off 1 s after the tone has finished
       for (int i = 0; i < (int)Led::COUNT; i++) IO::setLed((Led)i, Pattern::Off);
-      Display::clear();
       return;
 
     case State::PowerOn:
@@ -142,7 +144,6 @@ void enter(State s) {
       if (sc().lowBattery) {
         sfx("alert");
         say("low_battery");
-        lowBatteryShownAt = millis();
       }
       break;
 
@@ -235,7 +236,11 @@ void enter(State s) {
       cprLoopStarted = false;
       // After "no shock" the trainee was already told "Riprendere RCP"
       if (prev != State::NoShock) say("safe_touch");
-      Audio::loop(v("cpr_cycle").c_str());
+      {
+        std::vector<String> cycle{Audio::beats(COMPRESSIONS, CPR_BPM)};
+        for (uint8_t i = 0; i < BREATHS; i++) cycle.push_back(Audio::slot(v("give_breaths"), BREATH_SLOT_MS));
+        Audio::loop(cycle);
+      }
       log(String("RCP: ") + sc().cprCycles + " cicli 30:2");
       break;
 
@@ -251,51 +256,13 @@ bool armedOrCharging() {
   return state == State::Charge || state == State::Armed || state == State::AutoShock;
 }
 
-// Single 7-segment digit:
-//   8.  self-test at power on       1-9,0  scenario (0 = 10) while waiting pads
-//   F   check pads (loose contact)  spinning segment  analysis
-//   -   motion during analysis      C   charging
-//   n   shock n (blinks while armed), shocks delivered afterwards
-//   n.  CPR cycle n                 L   battery low (3 s)
-char digit(uint32_t n) { return '0' + (n % 10); }
-
-void updateDisplay() {
-  char buf[4] = {0};
-  uint32_t t = since(stateAt);
-  bool blink = (millis() / 400) % 2;
-  auto one = [&](char c, bool dp = false) {
-    buf[0] = c;
-    buf[1] = dp ? '.' : 0;
-    Display::show(buf);
-  };
-  if (since(scenarioShownAt) < 2000) return one(digit(scenarioIdx + 1));
-  if (since(lowBatteryShownAt) < 3000) return one('L');
-  switch (state) {
-    case State::Off: Display::clear(); break;
-    case State::PowerOn: t < SELFTEST_MS ? one('8', true) : Display::clear(); break;
-    case State::WaitPads: one(digit(scenarioIdx + 1)); break;
-    case State::PadsCheck: one('F'); break;
-    case State::Analyze: {
-      static const uint8_t spin[] = {0x01, 0x02, 0x04, 0x08, 0x10, 0x20};  // a..f
-      Display::showSegments(spin[(millis() / 120) % 6]);
-      break;
-    }
-    case State::Motion: one('-'); break;
-    case State::Charge: one('C'); break;
-    case State::Armed:
-    case State::AutoShock: blink ? one(digit(shocks + 1)) : Display::clear(); break;
-    case State::Cpr: one(digit(cprCycle()), true); break;
-    default: one(digit(shocks)); break;
-  }
-}
-
 }  // namespace
 
 void begin(uint8_t scenario, bool autoMd) {
+  IO::setMetronomeBpm(CPR_BPM);  // CPR light, in step with the clicks
   scenarioIdx = scenario < Scenarios::count() ? scenario : 0;
   autoMode = autoMd;
   state = State::Off;
-  Display::clear();
 }
 
 void update() {
@@ -402,12 +369,6 @@ void update() {
       if (!busy) enter(State::Analyze);
       break;
   }
-
-  static uint32_t lastDisp = 0;
-  if (now - lastDisp > 100) {
-    lastDisp = now;
-    updateDisplay();
-  }
 }
 
 void power() {
@@ -444,7 +405,6 @@ void skip() {
 void selectScenario(uint8_t i) {
   if (i >= Scenarios::count()) return;
   scenarioIdx = i;
-  scenarioShownAt = millis();
   if (analyses == 0) resetFaults();
   log(String("Scenario ") + (i + 1) + ": " + sc().name);
   rev++;
@@ -491,7 +451,6 @@ void injectLowBattery() {
   if (state == State::Off) return;
   sfx("alert");
   say("low_battery");
-  lowBatteryShownAt = millis();
   log("Batteria scarica");
 }
 

@@ -29,7 +29,7 @@ __pycache__/
 
 # Rendered voice prompts: everyone generates their own with tools/gen_audio.py
 # (the licence depends on the voice used, e.g. macOS voices can't be shared)
-sdcard/
+data/
 
 # Per-machine voice settings for tools/gen_audio.py
 audio/voice.local.json

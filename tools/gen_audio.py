@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Render the AED trainer voice prompts and sound effects to MP3.
+"""Render the AED trainer voice prompts to MP3.
 
-Reads audio/prompts.json and writes into sdcard/. That folder is flashed
-to the internal LittleFS by `pio run -t uploadfs` (default build), or can
-be copied to the root of a FAT32 micro-SD card (audiokit-sd build):
+Reads audio/prompts.json and writes into data/. That folder is flashed
+to the internal LittleFS by `pio run -t uploadfs`:
 
-    sdcard/<lang>/<prompt_id>.mp3   voice prompts, one folder per language
-    sdcard/<lang>/cpr_cycle.mp3     30 metronome beats + breath prompts
-    sdcard/sfx/<sound_id>.mp3       language independent tones
+    data/<lang>/<prompt_id>.mp3   voice prompts, one folder per language
+
+Sound effects and the CPR metronome are synthesised by the firmware, and
+any prompt can be replaced from the web UI ("Messaggi vocali").
 
 Engines ("engine" in prompts.json, audio/voice.local.json, or --engine):
     kokoro  Kokoro open-weight TTS (Apache-2.0), offline. tools/setup.sh kokoro
@@ -25,18 +25,15 @@ Usage:
 """
 import argparse
 import json
-import math
 import shutil
-import struct
 import subprocess
 import sys
 import tempfile
-import wave
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 PROMPTS = ROOT / "audio" / "prompts.json"
-OUT = ROOT / "sdcard"
+OUT = ROOT / "data"
 LOCAL = ROOT / "audio" / "voice.local.json"
 VOICES = ROOT / "tools" / "voices"
 KOKORO_PY = ROOT / "tools" / ".venv-kokoro" / "bin" / "python"
@@ -45,11 +42,6 @@ KOKORO_HELPER = ROOT / "tools" / "kokoro_tts.py"
 SAMPLE_RATE = 22050  # plenty for speech and small speakers
 CHANNELS = 2  # identical L/R: the I2S driver handles stereo much faster than mono
 BITRATE = "64k"
-
-# CPR cycle (ERC 2021: 30:2, 100-120/min, < 10 s pause for the breaths)
-CPR_BPM = 110
-BREATHS = 2
-BREATH_INTERVAL = 3.0  # s between "give breath" prompts: ~1 s insufflation + exhalation
 
 
 def run(cmd, **kw):
@@ -118,87 +110,6 @@ def tts(engine: str, lang_cfg: dict, text: str, wav: Path):
         sys.exit(f"Unknown engine {engine}")
 
 
-# ---------------------------------------------------------------- tones ---
-
-def write_wav(path: Path, samples):
-    with wave.open(str(path), "wb") as w:
-        w.setnchannels(1)
-        w.setsampwidth(2)
-        w.setframerate(SAMPLE_RATE)
-        w.writeframes(b"".join(struct.pack("<h", int(max(-1, min(1, s)) * 32000)) for s in samples))
-
-
-def read_wav(path: Path):
-    with wave.open(str(path), "rb") as w:
-        assert w.getnchannels() == 1 and w.getsampwidth() == 2
-        data = w.readframes(w.getnframes())
-    return [v / 32000 for v in struct.unpack(f"<{len(data) // 2}h", data)]
-
-
-def envelope(i, n, attack=0.005, release=0.02):
-    a, r = int(attack * SAMPLE_RATE), int(release * SAMPLE_RATE)
-    if i < a:
-        return i / a
-    if i > n - r:
-        return max(0.0, (n - i) / r)
-    return 1.0
-
-
-def tone(freq, dur, vol=0.8, harmonics=(1.0,)):
-    n = int(dur * SAMPLE_RATE)
-    out = []
-    for i in range(n):
-        t = i / SAMPLE_RATE
-        s = sum(h * math.sin(2 * math.pi * freq * (k + 1) * t) for k, h in enumerate(harmonics))
-        out.append(vol * envelope(i, n) * s / sum(harmonics))
-    return out
-
-
-def silence(dur):
-    return [0.0] * int(dur * SAMPLE_RATE)
-
-
-def sweep(f0, f1, dur, vol=0.6):
-    n = int(dur * SAMPLE_RATE)
-    out, phase = [], 0.0
-    for i in range(n):
-        f = f0 + (f1 - f0) * (i / n)
-        phase += 2 * math.pi * f / SAMPLE_RATE
-        out.append(vol * envelope(i, n) * math.sin(phase))
-    return out
-
-
-def sfx_bank():
-    """Synthesised effects, roughly modelled on real AED sounds."""
-    beep = tone(1000, 0.08, 0.9, (1.0, 0.3))
-    period = 60.0 / 110  # 110 compressions per minute (ERC/AHA 100-120)
-    return {
-        # Short UI beep (power on, button acknowledge)
-        "beep": tone(880, 0.15, 0.8, (1.0, 0.2)),
-        # Power-on chime
-        "power_on": tone(660, 0.12) + silence(0.04) + tone(990, 0.2),
-        # Power-off descending chime
-        "power_off": tone(990, 0.12) + silence(0.04) + tone(660, 0.25),
-        # Shock delivered: thump + short burst
-        "shock": sweep(180, 60, 0.18, 1.0) + tone(1200, 0.25, 0.7, (1, 0.5, 0.3)),
-        # Disarm / internal discharge
-        "disarm": sweep(1200, 300, 0.6, 0.5),
-        # Single metronome tick and a 30-beat metronome block (for previews)
-        "metronome": beep + silence(period - 0.08),
-        # Alert / error tone (pads, motion...)
-        "alert": (tone(600, 0.2) + silence(0.1)) * 3,
-    }
-
-
-def metronome_block(beats=30, bpm=CPR_BPM):
-    period = 60.0 / bpm
-    click = tone(1000, 0.08, 0.9, (1.0, 0.3))
-    out = []
-    for _ in range(beats):
-        out += click + silence(period - len(click) / SAMPLE_RATE)
-    return out
-
-
 # ---------------------------------------------------------------- main ---
 
 def main():
@@ -208,7 +119,7 @@ def main():
     ap.add_argument("--only", action="append", help="prompt/sfx id(s) to render")
     ap.add_argument("--force", action="store_true", help="re-render existing files")
     ap.add_argument("--play", action="store_true", help="play each file after rendering (macOS)")
-    ap.add_argument("--out", type=Path, help="output folder (default: sdcard/)")
+    ap.add_argument("--out", type=Path, help="output folder (default: data/)")
     args = ap.parse_args()
 
     global OUT
@@ -242,30 +153,18 @@ def main():
     with tempfile.TemporaryDirectory() as tmpd:
         tmp = Path(tmpd)
 
-        print("Sound effects")
-        bank = sfx_bank()
-        for old in (OUT / "sfx").glob("*.mp3"):
-            if old.stem not in bank:
-                old.unlink()
-                print(f"  removed {old}")
-        for sid, samples in bank.items():
-            dst = OUT / "sfx" / f"{sid}.mp3"
-            if need(sid, dst):
-                w = tmp / f"{sid}.wav"
-                write_wav(w, samples)
-                # tones are already at a good level; skip loudnorm so the
-                # metronome keeps its exact length
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(w),
-                     "-af", "apad=pad_dur=0.3",  # the decoder may drop the last frames
-                     "-ac", str(CHANNELS), "-ar", str(SAMPLE_RATE), "-c:a", "libmp3lame", "-b:a", BITRATE, "-write_xing", "0",
-                     str(dst)])
-                played(dst)
+        # Sound effects and the CPR cycle used to be files: now synthesised
+        # by the firmware
+        for old in [*(OUT / "sfx").glob("*.mp3"), *OUT.glob("*/cpr_cycle.mp3")]:
+            old.unlink()
+            print(f"  removed {old}")
+        if (OUT / "sfx").is_dir() and not any((OUT / "sfx").iterdir()):
+            (OUT / "sfx").rmdir()
 
         for lang in langs:
             lcfg = cfg["languages"][lang]
             # drop files of prompts that were removed from prompts.json
-            keep = set(cfg["prompts"]) | {"cpr_cycle"}
+            keep = set(cfg["prompts"])
             for old in (OUT / lang).glob("*.mp3"):
                 if old.stem not in keep:
                     old.unlink()
@@ -281,36 +180,6 @@ def main():
                     tts(args.engine, lcfg, texts[lang], w)
                     to_mp3(w, dst)
                     played(dst)
-
-            # CPR cycle, looped by the firmware for the whole CPR period:
-            #   30 compressions at 110/min
-            #   "give breaths" spoken once per breath, BREATH_INTERVAL apart
-            #   then straight into the next 30 compressions
-            dst = OUT / lang / "cpr_cycle.mp3"
-            if need("cpr_cycle", dst) and "give_breaths" in cfg["prompts"]:
-                def spoken(pid):
-                    """TTS -> loudness-normalised mono samples at SAMPLE_RATE."""
-                    raw, norm = tmp / f"{lang}_{pid}_raw.wav", tmp / f"{lang}_{pid}_n.wav"
-                    tts(args.engine, lcfg, cfg["prompts"][pid][lang], raw)
-                    run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(raw),
-                         "-af", "loudnorm=I=-16:TP=-1.5:LRA=11", "-ac", "1", "-ar", str(SAMPLE_RATE),
-                         "-sample_fmt", "s16", str(norm)])
-                    return read_wav(norm)
-
-                def padded(samples, seconds):
-                    return samples + silence(max(0.0, seconds - len(samples) / SAMPLE_RATE))
-
-                breath = spoken("give_breaths")
-                cycle = metronome_block()
-                for _ in range(BREATHS):
-                    cycle += padded(breath, BREATH_INTERVAL)
-                wav = tmp / f"{lang}_cpr.wav"
-                write_wav(wav, cycle)
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(wav),
-                     "-ac", str(CHANNELS), "-ar", str(SAMPLE_RATE), "-c:a", "libmp3lame", "-b:a", BITRATE, "-write_xing", "0",
-                     str(dst)])
-                played(dst)
 
     Kokoro.close()
     print(f"Done, {done} file(s) written to {OUT}/")

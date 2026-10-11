@@ -7,7 +7,6 @@
 
 #include "aed.h"
 #include "audio.h"
-#include "display.h"
 #include "io.h"
 #include "pins.h"
 #include "power.h"
@@ -115,7 +114,6 @@ void setup() {
   i2cProbe();
   Audio::begin();  // first: the board driver reconfigures the key GPIOs
   IO::begin();
-  Display::begin();
 
   bool autoMode = IO::hasModeSwitch() ? false : prefs.getBool("auto", false);
   Aed::begin(prefs.getUChar("scenario", 0), autoMode);
