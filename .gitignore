@@ -7,6 +7,10 @@
 # Generated at build time from web/index.html (scripts/embed_web.py)
 include/web_index.h
 
+# clangd compilation database, regenerate with: pio run -t compiledb
+compile_commands.json
+.cache/
+
 # Local tooling, recreated by tools/setup.sh
 tools/.venv/
 tools/.venv-kokoro/

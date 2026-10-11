@@ -1,0 +1,19 @@
+# clangd config for editors (Zed, VS Code + clangd, ...).
+# Generate compile_commands.json first with:  pio run -t compiledb
+CompileFlags:
+  # Clang has no Xtensa target: parse as a generic 32-bit bare-metal ELF and
+  # rely on the toolchain include paths PlatformIO writes into the database.
+  Add:
+    - --target=riscv32-unknown-elf
+    - -nostdlibinc
+    - -Wno-unknown-warning-option
+    - -Wno-unknown-attributes
+  # GCC/Xtensa-only flags clang doesn't understand
+  Remove:
+    - -mlongcalls
+    - -mfix-esp32-psram-cache-issue
+    - -mtext-section-literals
+    - -fstrict-volatile-bitfields
+    - -fno-tree-switch-conversion
+    - -freorder-blocks
+    - -fno-jump-tables
